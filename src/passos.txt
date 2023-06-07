@@ -1,0 +1,248 @@
+1. atualizar o ionic 
+npm i -g @ionic/cli
+
+2. Criando o projeto
+ionic start camApp blank --type=angular
+opção ng models
+
+3.Documentaçaõ ionic
+rodar esse comando do Angular Bild firstApp
+camera pra filmar preferencer salva as preferencias e filesystem para começar ter acesso aos arquivos no celular
+
+npm install @capacitor/camera @capacitor/preferences @capacitor/filesystem
+
+
+4. Instalar o PWA 
+rodar esse comando
+npm install @ionic/pwa-elements
+
+5. Importar PWA no Main.ts
+
+import { defineCustomElements } from '@ionic/pwa-elements/loader';
+
+colocar no fim do codigo
+defineCustomElements(window);
+
+6. Rodar o comando do progressive Web Apps
+para transforar realmente em PWA
+
+ng add @angular/pwa
+
+7.Alguns comandos podem nao funcionar antes de compilar.
+Rodar o comando cria a pasta www
+ionic build --prod 
+
+
+8.Ir em home pagehtml
+
+colar no content
+ <ion-fab vertical="bottom" horizontal="end" slot="fixed">
+    <ion-fab-button color="success">
+      <ion-icon name="camera"></ion-icon>
+    </ion-fab-button>
+  </ion-fab>
+
+9 Deletar o Dark theme>variabless> apagar mediadark
+
+10 Gerar um serviço de foto
+
+ ionic g service services/foto
+
+11 vai no serviço criado e coloca os importes foto.service.ts
+copia la da documentação taking-photos
+
+import { Camera, CameraResultType, CameraSource, Photo } from '@capacitor/camera';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Preferences } from '@capacitor/preferences';
+
+
+12. Criar um nova pasta no app com nome de models
+dentro da pasta models criar um arquivo com o nome Foto.interface.ts
+
+
+
+13. dentro do arquivo Foto.interface.ts
+pegar la na pag Displaying Photos e trocar por Foto onde esta UsePhoto
+
+export interface Foto {
+  filepath: string;
+  webviewPath?: string;
+} 
+
+
+14 ir em foto.service.ts
+
+  //lista das fotos que estão armazenadas no dispositivo
+  fotos: Foto[] = [];
+  //cria uma variavel para armazenar o loca fixo das fotos
+  private FOTO_ARMAZENAMENT: string = 'fotos';
+
+-- dia 01/06
+
+15 codigo como era de varios lugares o ronan mandou copiar do jeito que estava e depois explicava
+no foto.service.ts
+
+    Codigo demonstrado abaixo:
+      
+---------------------------------------------------------------------------------------------------------------------------
+import { Injectable } from '@angular/core';
+
+import {  Camera,  CameraResultType,  CameraSource,  Photo,} from '@capacitor/camera';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Preferences } from '@capacitor/preferences';
+import { Platform } from '@ionic/angular';
+import { Capacitor } from '@capacitor/core';
+import { Foto } from '../models/Foto.interface';
+
+@Injectable({
+  providedIn: 'root',
+})
+export class FotoService {
+  fotos: Foto[] = [];
+  private FOTO_ARMAZENAMENTO: string = 'fotos';
+
+  constructor(private platform: Platform) { }
+
+  public async carregarFotosSalvas() {
+    // Recuperar as fotos em cache
+    const listaFotos = await Preferences.get({ key: this.FOTO_ARMAZENAMENTO });
+    this.fotos = JSON.parse(listaFotos.value as string) || [];
+
+    // Se não estiver rodando no navegador...
+    if (!this.platform.is('hybrid')) {
+      // Exibir a foto lendo-a no formato base64
+      for (let foto of this.fotos) {
+        // Ler os dados de cada foto salva no sistema de arquivos
+        const readFile = await Filesystem.readFile({
+          path: foto.filepath,
+          directory: Directory.Data,
+        });
+
+        // Somente na plataforma da Web: Carregar a foto como dados base64
+        foto.webviewPath = `data:image/jpeg;base64,${readFile.data}`;
+      }
+    }
+  }
+
+  public async tirarFoto() {
+    // Take a photo
+    const fotoCapturada = await Camera.getPhoto({
+      resultType: CameraResultType.Uri, // dados baseados em arquivos; oferece o melhor desempenho
+      source: CameraSource.Camera, // tirar automaticamente uma nova foto com a câmera
+      quality: 100,
+    });
+
+    const salvarArquivoFoto = await this.salvarFoto(fotoCapturada);
+
+    // Adicionar nova foto à matriz Fotos
+    this.fotos.unshift(salvarArquivoFoto);
+
+    // Armazenar em cache todos os dados da foto para recuperação futura
+    Preferences.set({
+      key: this.FOTO_ARMAZENAMENTO,
+      value: JSON.stringify(this.fotos),
+    });
+  }
+
+  // Salvar imagem em um arquivo no dispositivo
+  private async salvarFoto(foto: Photo) {
+    // Converta a foto para o formato base64, exigido pela API do sistema de arquivos para salvar
+    const base64Data = await this.readAsBase64(foto);
+
+    // Gravar o arquivo no diretório de dados
+    const nomeArquivo = new Date().getTime() + '.jpeg';
+    const arquivoSalvo = await Filesystem.writeFile({
+      path: nomeArquivo,
+      data: base64Data,
+      directory: Directory.Data,
+    });
+
+    if (this.platform.is('hybrid')) {
+      // Exiba a nova imagem reescrevendo o caminho 'file://' para HTTP
+      // Detalhes: https://ionicframework.com/docs/building/webview#file-protocol
+      return {
+        filepath: arquivoSalvo.uri,
+        webviewPath: Capacitor.convertFileSrc(arquivoSalvo.uri),
+      };
+    } else {
+      // Use o webPath para exibir a nova imagem em vez da base64, pois ela já está carregada na memória
+      return {
+        filepath: nomeArquivo,
+        webviewPath: foto.webPath,
+      };
+    }
+  }
+
+  // Leia a foto da câmera no formato base64 com base na plataforma em que o aplicativo está sendo executado
+  private async readAsBase64(foto: Photo) {
+    // "híbrido" detectará Cordova ou Capacitor
+    if (this.platform.is('hybrid')) {
+      // Ler o arquivo no formato base64
+      const arquivo = await Filesystem.readFile({
+        path: foto.path as string,
+      });
+
+      return arquivo.data;
+    } else {
+      // Obtenha a foto, leia-a como um blob e, em seguida, converta-a para o formato base64
+      const resposta = await fetch(foto.webPath!);
+      const blob = await resposta.blob();
+
+      return (await this.convertBlobToBase64(blob)) as string;
+    }
+  }
+
+  // Excluir a imagem, removendo-a dos dados de referência e do sistema de arquivos
+  public async deletePicture(foto: Foto, posicao: number) {
+    // Remover essa foto da matriz de dados de referência Fotos
+    this.fotos.splice(posicao, 1);
+
+    // Atualizar o cache da matriz de fotos sobrescrevendo a matriz de fotos existente
+    Preferences.set({
+      key: this.FOTO_ARMAZENAMENTO,
+      value: JSON.stringify(this.fotos),
+    });
+
+    // excluir o arquivo de foto do sistema de arquivos
+    const nomeArquivo = foto.filepath.substr(foto.filepath.lastIndexOf('/') + 1);
+    await Filesystem.deleteFile({
+      path: nomeArquivo,
+      directory: Directory.Data,
+    });
+  }
+
+  convertBlobToBase64 = (blob: Blob) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = reject;
+      reader.onload = () => {
+        resolve(reader.result);
+      };
+      reader.readAsDataURL(blob);
+    });
+
+}
+----------------------------------------------------------------------------------------------------------------------------------------
+
+
+06/06/06 
+
+adicionando o grid no home.page.html
+
+<ion-grid>
+  <ion-row>
+    <ion-col size="6" *ngFor="let photo of fotoService.foto; index as position">
+      <ion-img [src]="photo.webviewPath" (click)="showActionSheet"(photo, position)> </ion-img>
+  </ion-row>
+</ion-grid>
+
+ 
+
+Adicionar função no home.page.ts
+
+tirarFoto(){
+    this.fotoService.tirarFoto();
+  }
+
+
+
